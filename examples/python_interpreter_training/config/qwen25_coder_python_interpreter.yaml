@@ -1,0 +1,80 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  max_prompt_length: 2048
+  max_response_length: 2048
+  train_batch_size: 128
+  return_raw_chat: True
+
+actor_rollout_ref:
+  hybrid_engine: True
+  rollout:
+    name: sglang
+    multi_turn:
+      enable: True
+      max_turns: 10  # 允许更多轮次的交互来完成复杂编程任务
+      # 工具配置路径将在运行脚本中指定
+
+# 使用Qwen2.5-Coder-Instruct作为基础模型
+model:
+  path: Qwen/Qwen2.5-Coder-1.5B-Instruct  # 先用较小的模型测试
+
+# Actor配置（策略模型）
+actor_rollout_ref:
+  model:
+    path: Qwen/Qwen2.5-Coder-1.5B-Instruct
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+  
+  actor:
+    optim:
+      lr: 1e-6
+      lr_warmup_steps_ratio: 0.1
+    ppo_mini_batch_size: 128
+    ppo_micro_batch_size_per_gpu: 16
+    use_kl_loss: True
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0.01  # 鼓励探索不同的编程解决方案
+    fsdp_config:
+      param_offload: False
+      optimizer_offload: False
+  
+  rollout:
+    log_prob_micro_batch_size_per_gpu: 16
+    tensor_model_parallel_size: 1
+    name: sglang
+    gpu_memory_utilization: 0.6
+    n: 4  # 每个prompt生成4个响应进行采样
+    multi_turn:
+      enable: True
+      max_turns: 10
+  
+  ref:
+    log_prob_micro_batch_size_per_gpu: 16
+    fsdp_config:
+      param_offload: True
+
+# 算法配置
+algorithm:
+  adv_estimator: grpo  # 使用GRPO算法
+  use_kl_in_reward: False
+
+# 训练器配置
+trainer:
+  critic_warmup: 0
+  logger: ['console', 'wandb']
+  project_name: 'qwen_coder_python_interpreter'
+  experiment_name: 'qwen2.5-coder-1.5b_python_interpreter_rl'
+  n_gpus_per_node: 4
+  nnodes: 1
+  save_freq: 50
+  test_freq: 20
+  total_epochs: 100
+  val_before_train: False
