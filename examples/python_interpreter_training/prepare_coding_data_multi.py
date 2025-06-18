@@ -91,20 +91,23 @@ def prepare_kodcode_data():
         if test_info and len(test_info) > 0:
             function_declaration = test_info[0].get('function_declaration', '').strip()
         
-        prompt = f"""Please solve the following programming problem step by step using Python. 
+        prompt = f"""Please solve the following programming problem step by step.
 
-You should:
-1. First understand the problem carefully
-2. Use the Python interpreter to test your understanding and explore solutions  
-3. Write code step by step, testing each part
-4. Provide the final solution
-
-Problem: {question}"""
+Problem:
+{question}"""
         
         if function_declaration:
-            prompt += f"\n\nNote: The function should follow this declaration: {function_declaration}"
+            prompt += f"\n\nFunction Declaration: {function_declaration}"
         
-        prompt += "\n\nPlease use the Python interpreter to help you solve this problem step by step."
+        prompt += f"""
+
+Instructions:
+1. Analyze the problem and understand what's required
+2. Use <python_interpreter> tags to test your understanding and explore solutions
+3. Develop your solution incrementally, testing each part
+4. Provide the final working solution
+
+Use the Python interpreter throughout your problem-solving process to verify your approach."""
         
         test_code = "from solution import *\n" + example['test'].strip()
         
@@ -134,7 +137,7 @@ Problem: {question}"""
     return transformed_dataset, "kodcode"
 
 
-def prepare_leetcode_data(leetcode_dir="/home/lixy/workspace/code-r1/LeetCodeDataset"):
+def prepare_leetcode_data(leetcode_dir="/home/lixy/workspace/VerlCoder/code-r1/LeetCodeDataset"):
     """
     准备LeetCode数据集，参考code-r1的方法
     """
@@ -194,11 +197,21 @@ def prepare_leetcode_data(leetcode_dir="/home/lixy/workspace/code-r1/LeetCodeDat
         print(f"LeetCode数据集加载失败: {e}")
         return None, None
     
-    # 系统提示词
-    SYSTEM_PROMPT = """You are a helpful programming assistant. \
-The user will ask you a question and you as the assistant solve it. \
-The assistant first thinks how to solve the task through reasoning and then provides the user with the final answer. \
-The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively."""
+    # 系统提示词 - 专注于Python解释器调用
+    SYSTEM_PROMPT = """You are a helpful programming assistant that can execute Python code using an interpreter.
+
+When you need to run Python code, use the format:
+<python_interpreter>
+your_python_code_here
+</python_interpreter>
+
+The interpreter will execute your code and return the results. You can use this to:
+- Test your understanding of problems
+- Explore different approaches
+- Verify your solutions step by step
+- Debug and refine your code
+
+Always explain your approach and use the Python interpreter to solve problems incrementally."""
     
     # 转换数据格式
     def transform_leetcode_example(example, idx):
@@ -207,17 +220,18 @@ The reasoning process and answer are enclosed within <think>...</think> and <ans
             problem_query = example['meta']['query'].strip()
             original_question = problem_query
             
-            prompt = f"""Please solve the following programming problem step by step using Python.
+            prompt = f"""Please solve the following programming problem step by step.
 
-You should:
-1. First understand the problem carefully
-2. Use the Python interpreter to test your understanding and explore solutions
-3. Write code step by step, testing each part  
-4. Provide the final solution
-
+Problem:
 {problem_query}
 
-Please use the Python interpreter to help you solve this problem step by step."""
+Instructions:
+1. Analyze the problem and understand what's required
+2. Use <python_interpreter> tags to test your understanding and explore solutions
+3. Develop your solution incrementally, testing each part
+4. Provide the final working solution
+
+Use the Python interpreter throughout your problem-solving process to verify your approach."""
             
             # 构建测试代码 - 使用LeetCode的测试格式
             test_code = f"{example['test']}\n\ncheck({example['entry_point'].strip()})"
@@ -228,11 +242,18 @@ Please use the Python interpreter to help you solve this problem step by step.""
             problem_text = example.get('src', example.get('problem', 'No problem description'))
             original_question = problem_text
             
-            prompt = f"""Please solve the following programming problem step by step using Python.
+            prompt = f"""Please solve the following programming problem step by step.
 
+Problem:
 {problem_text}
 
-Please use the Python interpreter to help you solve this problem step by step."""
+Instructions:
+1. Analyze the problem and understand what's required
+2. Use <python_interpreter> tags to test your understanding and explore solutions  
+3. Develop your solution incrementally, testing each part
+4. Provide the final working solution
+
+Use the Python interpreter throughout your problem-solving process to verify your approach."""
             
             test_code = example.get('test', 'pass')
             reference = example.get('completion', example.get('solution', ''))

@@ -10,9 +10,9 @@ ulimit -n 65535
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/python_interpreter_training/config"
 
-# 编程数据集路径 - 只使用LeetCode数据集（敏捷迭代）
-code_train_path=/data/coding_leetcode/train.parquet
-code_test_path=/data/coding_leetcode/test.parquet
+# 编程数据集路径 - 只使用LeetCode数据集（新格式，支持<python_interpreter>标签）
+code_train_path=/data/coding_leetcode_v2/train.parquet
+code_test_path=/data/coding_leetcode_v2/test.parquet
 
 train_files="['$code_train_path']"
 test_files="['$code_test_path']"
@@ -57,7 +57,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='qwen_coder_python_interpreter' \
-    trainer.experiment_name='qwen2.5-coder-1.5b_leetcode_only_v1' \
+    trainer.experiment_name='qwen2.5-coder-1.5b_leetcode_function_call_v1' \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=20 \

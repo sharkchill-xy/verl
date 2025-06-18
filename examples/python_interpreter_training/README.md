@@ -106,12 +106,12 @@ bash examples/python_interpreter_training/run_qwen25_coder_python_interpreter.sh
 
 ### ✅ 已完成的工作
 
-1. **数据集准备完成（敏捷迭代版本）**
-   - 训练数据: `/data/coding_leetcode/train.parquet` (1,890个样本)
-   - 测试数据: `/data/coding_leetcode/test.parquet` (150个样本)
+1. **数据集准备完成（敏捷迭代 + Function Call版本）**
+   - 训练数据: `/data/coding_leetcode_v2/train.parquet` (1,890个样本)
+   - 测试数据: `/data/coding_leetcode_v2/test.parquet` (150个样本)
    - 数据来源: LeetCodeDataset v2 (仅LeetCode数据)
-   - 数据格式: 包含对话格式、测试用例、奖励模型等完整字段
-   - 选择理由: 采用敏捷迭代方式，先用小数据集验证效果
+   - 数据格式: 标准OpenAI function call格式，调用`python_interpreter`函数
+   - 选择理由: 采用敏捷迭代方式，使用通用function call格式便于迁移
 
 2. **环境配置完成**
    - SandboxFusion服务运行正常: `http://210.28.135.36:8080`
@@ -155,7 +155,7 @@ bash examples/python_interpreter_training/run_qwen25_coder_python_interpreter.sh
 
 1. 确认SandboxFusion服务运行: `docker ps | grep sandbox`
 2. 确认verl容器运行: `docker ps | grep verl`
-3. 确认数据在容器中: `docker exec verl ls -la /data/coding_leetcode/`
+3. 确认数据在容器中: `docker exec verl ls -la /data/coding_leetcode_v2/`
 4. 检查工具配置: `grep sandbox_fusion_url /home/lixy/workspace/VerlCoder/verl/examples/python_interpreter_training/config/tool_config/python_interpreter_tool_config.yaml`
 
 ## 配置文件说明
