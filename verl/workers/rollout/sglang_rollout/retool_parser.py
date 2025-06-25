@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ============================================================================
+# UNDER REVIEW: ReTool Format Parser Implementation
+# Status: Needs verification of parsing logic and error handling
+# Priority: HIGH - Critical for ReTool format support
+# Issues: Need to verify regex patterns and function call conversion
+# ============================================================================
+
 import json
 import re
 from typing import List, Tuple

@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ============================================================================
+# UNDER REVIEW: ReTool Core Tool Implementation
+# Status: Needs comprehensive review for reward calculation logic
+# Priority: HIGH - Core functionality affects RL training effectiveness
+# Issues: Reward calculation not using answer correctness, memory management
+# ============================================================================
+
 import logging
 import os
 import re

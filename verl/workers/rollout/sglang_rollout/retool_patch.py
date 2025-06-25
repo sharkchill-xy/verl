@@ -13,7 +13,95 @@
 # limitations under the License.
 
 """
-Monkey patch to enable ReTool parser support in SGLang rollout.
+ReTool Parser Injection Mechanism for VERL SGLang Rollout
+
+This module implements a non-intrusive monkey patch system to inject ReTool format 
+support into VERL's SGLang rollout without modifying core framework code.
+
+## Injection Mechanism Overview
+
+The ReTool parser injection uses a runtime monkey patch approach that:
+1. Conditionally activates based on environment variable
+2. Wraps the original function call parser with ReTool support
+3. Maintains full backward compatibility with existing functionality
+
+## Usage Instructions
+
+### 1. Environment Variable Activation
+Set the environment variable to enable ReTool parser support:
+```bash
+export VERL_USE_RETOOL_PARSER=1
+```
+
+### 2. Training Script Integration
+Include the environment variable in your training script:
+```bash
+#!/bin/bash
+export VERL_USE_RETOOL_PARSER=1
+python3 -m verl.trainer.main_ppo --config-path="config" --config-name="retool_config"
+```
+
+### 3. Automatic Injection Process
+The injection happens automatically when importing VERL modules:
+- Module import triggers patch_sglang_rollout()
+- Original SGLangRollout._setup_tool method is wrapped
+- Function call parser gets wrapped with ReToolWrapper
+- ReTool format support becomes available transparently
+
+## Technical Details
+
+### Supported Formats
+- **ReTool Format**: `<code>```python\ncode_here\n```</code>`
+- **Standard Format**: Original SGLang function calling format
+- **Hybrid Support**: Both formats can be used simultaneously
+
+### Parser Precedence
+1. First checks for ReTool code block format
+2. Falls back to standard function call parsing
+3. Maintains all original parser functionality
+
+### Error Handling
+- ReTool parsing errors gracefully fall back to standard parser
+- Original parser behavior preserved if patch fails
+- No impact on non-ReTool workloads
+
+## Design Benefits
+
+### Non-Intrusive Design
+- ✅ Zero modifications to VERL core code
+- ✅ Optional activation via environment variable
+- ✅ Complete backward compatibility
+- ✅ Easy to disable or remove
+
+### Research-Friendly
+- ✅ Rapid prototyping and iteration
+- ✅ Quick testing of new parser formats
+- ✅ Safe experimentation without breaking existing code
+- ✅ Hot-swappable functionality
+
+### Maintenance Considerations
+- ⚠️ Monitor VERL version compatibility
+- ⚠️ Test patch behavior after VERL updates
+- ⚠️ Document any version-specific requirements
+- ⚠️ Consider upstreaming successful features
+
+## Example Usage in Research
+
+```python
+# Model generates ReTool format response
+response = \"\"\"Let me calculate this step by step.
+<code>
+```python
+result = 2 + 2
+print(f"The answer is: {result}")
+```
+</code>
+The final answer is 4.\"\"\"
+
+# ReToolWrapper automatically detects and processes the code block
+# Converts to standard function call format for execution
+# Returns result integrated into the conversation flow
+```
 """
 
 import os
