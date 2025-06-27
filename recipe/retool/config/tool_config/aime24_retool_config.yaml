@@ -1,0 +1,23 @@
+tools:
+  - class_name: "verl.tools.sandbox_fusion_tools.SandboxFusionTool"
+    config: 
+      num_workers: 10
+      rate_limit: 10
+      default_timeout: 30
+      default_language: "python"
+      enable_global_rate_limit: true
+      sandbox_fusion_url: "http://210.28.135.36:8080"
+      memory_limit_mb: 1024
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_interpreter"
+        description: "Execute Python code to help solve mathematical problems. The code will be run in a safe environment and the output will be returned."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: "Python code to execute"
+          required: ["code"]

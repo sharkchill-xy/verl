@@ -1,0 +1,68 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - generation
+  - _self_
+
+# 覆盖默认配置
+trainer:
+  nnodes: 1
+  n_gpus_per_node: 8
+  device: cuda
+
+data:
+  path: /data2/lixy/VerlCoder/data/aime24_eval_multiturn/test.parquet
+  prompt_key: messages
+  n_samples: 1
+  output_path: /data2/lixy/VerlCoder/results/aime24_generated_responses.parquet
+  batch_size: 16
+  trust_remote_code: true
+  return_raw_chat: true
+
+model:
+  path: /data2/lixy/VerlCoder/models/retool_sft_16epochs/global_step_30
+  external_lib: null
+  trust_remote_code: true
+
+rollout:
+  name: sglang
+  mode: async
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.7
+  prompt_length: 14336
+  response_length: 2048
+  gpu_memory_utilization: 0.8
+  n: 1
+  multi_stage_wake_up: false
+  
+  # SGLang 多轮对话配置
+  multi_turn:
+    enable: true
+    max_assistant_turns: 4
+    max_user_turns: 4
+    tool_config_path: "/home/lixy/workspace/VerlCoder/verl/recipe/retool/config/tool_config/aime24_retool_config.yaml"
+    interaction_config_path: null
+    completion_callback: null
+    use_inference_chat_template: true
+    tokenization_sanity_check_mode: "strict"  
+    format: hermes
+
+actor:
+  strategy: fsdp
+  ulysses_sequence_parallel_size: 4
+  fsdp_config:
+    fsdp_size: -1
+    forward_prefetch: false
+    param_offload: false
+    optimizer_offload: false
+    offload_policy: false
+    reshard_after_forward: true
+    wrap_policy:
+      min_num_params: 0
+
+ray_init:
+  num_cpus: null
+  timeline_json_file: null
