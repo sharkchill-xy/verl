@@ -24,14 +24,22 @@ SANDBOX_URL="http://210.28.135.36:8080"
 
 # 评估参数
 MAX_TURNS=4
-N_SAMPLES=1
+N_SAMPLES=32
 TEMPERATURE=0.7
 TOP_P=0.9
 TOP_K=50
 
+# 并发参数
+MAX_CONCURRENT_REQUESTS=10
+MAX_CONCURRENT_SANDBOX=5
+REQUEST_TIMEOUT=300
+
 echo "Starting standalone AIME24 evaluation..."
 echo "Model: $MODEL_NAME"
 echo "Output: $OUTPUT_PATH"
+echo "Samples per problem: $N_SAMPLES"
+echo "Max concurrent requests: $MAX_CONCURRENT_REQUESTS"
+echo "Max concurrent sandbox: $MAX_CONCURRENT_SANDBOX"
 
 python recipe/retool/eval_aime24_standalone.py \
     --model_name_or_path "$MODEL_NAME" \
@@ -43,8 +51,12 @@ python recipe/retool/eval_aime24_standalone.py \
     --n_samples $N_SAMPLES \
     --temperature $TEMPERATURE \
     --top_p $TOP_P \
+    --top_k $TOP_K \
     --max_length 16384 \
-    --sandbox_timeout 30
+    --sandbox_timeout 30 \
+    --max_concurrent_requests $MAX_CONCURRENT_REQUESTS \
+    --max_concurrent_sandbox $MAX_CONCURRENT_SANDBOX \
+    --request_timeout $REQUEST_TIMEOUT
 
 echo "Evaluation completed!"
 echo "Results saved to: $OUTPUT_PATH"

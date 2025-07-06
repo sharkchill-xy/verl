@@ -4,14 +4,17 @@ This script is used to evaluate the performance of the model on the AIME 2024 da
 """
 
 import argparse
+import asyncio
+import aiohttp
 import openai
 import datasets
 import json
 import re
-import requests
 import time
-from typing import Dict, Any, List
-from tqdm import tqdm
+from typing import Dict, Any, List, Optional
+from tqdm.asyncio import tqdm
+import logging
+from concurrent.futures import ThreadPoolExecutor
 
 
 TOOLS = [
@@ -40,33 +43,34 @@ TOOLS = [
 ]
 
 
-def execute_code(code: str, sandbox_url: str, timeout: int = 30) -> Dict[str, Any]:
-    """Execute Python code using Sandbox Fusion API"""
-    try:
-        response = requests.post(
-            f"{sandbox_url}/run_code",
-            json={
-                "code": code,
-                "language": "python",
-                "timeout": timeout
-            },
-            timeout=timeout + 5
-        )
-        response.raise_for_status()
-        result = response.json()
-        
-        run_result = result.get("run_result", {})
-        return {
-            "success": result.get("status"),
-            "output": run_result.get("stdout", ""),
-            "error": run_result.get("stderr", "")    
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "output": "",
-            "error": str(e)
-        }
+async def execute_code_async(session: aiohttp.ClientSession, code: str, sandbox_url: str, timeout: int = 30, semaphore: Optional[asyncio.Semaphore] = None) -> Dict[str, Any]:
+    """Execute Python code using Sandbox Fusion API asynchronously"""
+    async with semaphore if semaphore else asyncio.nullcontext():
+        try:
+            async with session.post(
+                f"{sandbox_url}/run_code",
+                json={
+                    "code": code,
+                    "language": "python",
+                    "timeout": timeout
+                },
+                timeout=aiohttp.ClientTimeout(total=timeout + 5)
+            ) as response:
+                response.raise_for_status()
+                result = await response.json()
+                
+                run_result = result.get("run_result", {})
+                return {
+                    "success": result.get("status") == "Success",
+                    "output": run_result.get("stdout", ""),
+                    "error": run_result.get("stderr", "")    
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": str(e)
+            }
 
 
 def extract_tool_calls(content: str) -> List[Dict[str, Any]]:
@@ -92,26 +96,39 @@ def extract_tool_calls(content: str) -> List[Dict[str, Any]]:
     return tool_calls
 
 
-def multi_turn_conversation(messages: List[Dict], tools: List[Dict], client, args) -> Dict[str, Any]:
-    """Handle multi-turn conversation with tool calls"""
+async def multi_turn_conversation_async(
+    session: aiohttp.ClientSession,
+    messages: List[Dict], 
+    tools: List[Dict], 
+    client, 
+    args,
+    request_semaphore: Optional[asyncio.Semaphore] = None,
+    sandbox_semaphore: Optional[asyncio.Semaphore] = None
+) -> Dict[str, Any]:
+    """Handle multi-turn conversation with tool calls asynchronously"""
     conversation_history = messages.copy()
     turn_count = 0
     
     while turn_count < args.max_turns:
         try:
             # Make API call to get assistant response
-            response = client.chat.completions.create(
-                model=args.model_name_or_path,
-                messages=conversation_history,
-                tools=tools,
-                tool_choice="auto",
-                max_tokens=args.max_length,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                extra_body={
-                    "top_k": args.top_k,
-                }
-            )
+            async with request_semaphore if request_semaphore else asyncio.nullcontext():
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: client.chat.completions.create(
+                        model=args.model_name_or_path,
+                        messages=conversation_history,
+                        tools=tools,
+                        tool_choice="auto",
+                        max_tokens=args.max_length,
+                        temperature=args.temperature,
+                        top_p=args.top_p,
+                        timeout=args.request_timeout,
+                        extra_body={
+                            "top_k": args.top_k,
+                        }
+                    )
+                )
             
             assistant_message = response.choices[0].message
             
@@ -138,16 +155,28 @@ def multi_turn_conversation(messages: List[Dict], tools: List[Dict], client, arg
             
             # Check if there are tool calls
             if assistant_message.tool_calls:
-                # Process each tool call
+                # Process each tool call asynchronously
+                tool_tasks = []
                 for tool_call in assistant_message.tool_calls:
                     if tool_call.function.name == "code_interpreter":
                         # Extract code from arguments
                         args_dict = json.loads(tool_call.function.arguments)
                         code = args_dict.get("code", "")
                         
-                        # Execute the code
-                        execution_result = execute_code(code, args.sandbox_url, args.sandbox_timeout)
-                        
+                        # Create async task for code execution
+                        task = execute_code_async(
+                            session, code, args.sandbox_url, args.sandbox_timeout, sandbox_semaphore
+                        )
+                        tool_tasks.append((tool_call.id, task))
+                
+                # Execute all tool calls concurrently
+                tool_results = await asyncio.gather(*[task for _, task in tool_tasks], return_exceptions=True)
+                
+                # Process results
+                for (tool_call_id, _), execution_result in zip(tool_tasks, tool_results):
+                    if isinstance(execution_result, Exception):
+                        output_content = f"Error: {execution_result}"
+                    else:
                         # Format output
                         if execution_result["success"]:
                             output_content = execution_result["output"]
@@ -155,13 +184,13 @@ def multi_turn_conversation(messages: List[Dict], tools: List[Dict], client, arg
                                 output_content += f"\nWarning: {execution_result['error']}"
                         else:
                             output_content = f"Error: {execution_result['error']}"
-                        
-                        # Add tool response to conversation
-                        conversation_history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": output_content
-                        })
+                    
+                    # Add tool response to conversation
+                    conversation_history.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": output_content
+                    })
                 
                 turn_count += 1
             else:
@@ -169,7 +198,7 @@ def multi_turn_conversation(messages: List[Dict], tools: List[Dict], client, arg
                 break
                 
         except Exception as e:
-            print(f"Error in conversation turn {turn_count}: {e}")
+            logging.error(f"Error in conversation turn {turn_count}: {e}")
             break
     
     return {
@@ -196,6 +225,82 @@ def extract_answer(text: str) -> str:
     return ""
 
 
+async def process_single_task(
+    session: aiohttp.ClientSession,
+    problem_id: int,
+    sample_id: int,
+    item: Dict[str, Any],
+    client,
+    args,
+    request_semaphore: asyncio.Semaphore,
+    sandbox_semaphore: asyncio.Semaphore,
+    pbar: tqdm
+) -> Dict[str, Any]:
+    """Process a single (problem_id, sample_id) task"""
+    try:
+        # Run multi-turn conversation
+        conversation_result = await multi_turn_conversation_async(
+            session,
+            item['messages'], 
+            item['tools'], 
+            client, 
+            args,
+            request_semaphore,
+            sandbox_semaphore
+        )
+        
+        # Extract predicted answer
+        predicted_answer = extract_answer(conversation_result['final_response'])
+        
+        # Create result
+        result = {
+            "problem_id": problem_id,
+            "sample_id": sample_id,
+            "problem": item['problem'],
+            "ground_truth": item['answer'],
+            "predicted_answer": predicted_answer,
+            "final_response": conversation_result['final_response'],
+            "conversation_history": conversation_result['conversation_history'],
+            "turn_count": conversation_result['turn_count'],
+            "correct": predicted_answer.strip() == str(item['answer']).strip()
+        }
+        
+        # Update progress bar with result info
+        pbar.set_postfix({
+            'Problem': f"{problem_id+1}",
+            'Sample': f"{sample_id+1}",
+            'Correct': result['correct'],
+            'Turns': result['turn_count']
+        })
+        pbar.update(1)
+        
+        return result
+        
+    except Exception as e:
+        logging.error(f"Error processing problem {problem_id+1}, sample {sample_id+1}: {e}")
+        result = {
+            "problem_id": problem_id,
+            "sample_id": sample_id,
+            "problem": item['problem'],
+            "ground_truth": item['answer'],
+            "predicted_answer": "",
+            "final_response": "",
+            "conversation_history": [],
+            "turn_count": 0,
+            "correct": False,
+            "error": str(e)
+        }
+        
+        pbar.set_postfix({
+            'Problem': f"{problem_id+1}",
+            'Sample': f"{sample_id+1}",
+            'Error': 'Yes'
+        })
+        pbar.update(1)
+        
+        return result
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str, required=True)
@@ -218,17 +323,27 @@ def parse_args():
     parser.add_argument("--max_turns", type=int, default=4)
     parser.add_argument("--n_samples", type=int, default=1)
     
+    # Concurrency parameters
+    parser.add_argument("--max_concurrent_requests", type=int, default=10)
+    parser.add_argument("--max_concurrent_sandbox", type=int, default=5)
+    parser.add_argument("--request_timeout", type=int, default=300)
+    
     args = parser.parse_args()
     return args
 
 
-def main():
+async def main_async():
     args = parse_args()
-
+    
+    # Setup logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Create OpenAI client
     client = openai.OpenAI(base_url=args.base_url, api_key=args.api_key)
-
+    
+    # Load dataset
     dataset = datasets.load_dataset("Maxwell-Jia/AIME_2024", split="train")
-
+    
     def map_fn(example: Dict[str, Any]) -> Dict[str, Any]:
         system_message = "You are a helpful assistant that can solve math problems with interaction Code Interpreter by Python code."
         user_message = f"""Solve the following problem step by step. You now have the ability to selectively write executable Python code to enhance your reasoning process.
@@ -258,59 +373,44 @@ def main():
     # Process dataset
     processed_dataset = dataset.map(map_fn)
     
-    results = []
+    # Create semaphores for concurrency control
+    request_semaphore = asyncio.Semaphore(args.max_concurrent_requests)
+    sandbox_semaphore = asyncio.Semaphore(args.max_concurrent_sandbox)
     
-    print(f"Starting evaluation on {len(processed_dataset)} problems...")
+    # Create all tasks
+    total_tasks = len(processed_dataset) * args.n_samples
+    print(f"Starting evaluation on {len(processed_dataset)} problems with {args.n_samples} samples each (total: {total_tasks} tasks)...")
     
-    for i, item in enumerate(tqdm(processed_dataset)):
-        print(f"\n--- Problem {i+1}/{len(processed_dataset)} ---")
-        print(f"Problem: {item['problem'][:100]}...")
-        
-        for sample in range(args.n_samples):
-            try:
-                # Run multi-turn conversation
-                conversation_result = multi_turn_conversation(
-                    item['messages'], 
-                    item['tools'], 
-                    client, 
-                    args
+    # Create progress bar
+    pbar = tqdm(total=total_tasks, desc="Evaluating")
+    
+    # Create HTTP session
+    timeout = aiohttp.ClientTimeout(total=args.request_timeout)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        # Create all tasks
+        tasks = []
+        for problem_id, item in enumerate(processed_dataset):
+            for sample_id in range(args.n_samples):
+                task = process_single_task(
+                    session,
+                    problem_id,
+                    sample_id,
+                    item,
+                    client,
+                    args,
+                    request_semaphore,
+                    sandbox_semaphore,
+                    pbar
                 )
-                
-                # Extract predicted answer
-                predicted_answer = extract_answer(conversation_result['final_response'])
-                
-                # Save result
-                result = {
-                    "problem_id": i,
-                    "sample_id": sample,
-                    "problem": item['problem'],
-                    "ground_truth": item['answer'],
-                    "predicted_answer": predicted_answer,
-                    "final_response": conversation_result['final_response'],
-                    "conversation_history": conversation_result['conversation_history'],
-                    "turn_count": conversation_result['turn_count'],
-                    "correct": predicted_answer.strip() == str(item['answer']).strip()
-                }
-                
-                results.append(result)
-                
-                print(f"Sample {sample+1}: Predicted={predicted_answer}, Ground Truth={item['answer']}, Correct={result['correct']}, Turn Count={conversation_result['turn_count']}")
-                
-            except Exception as e:
-                print(f"Error processing problem {i+1}, sample {sample+1}: {e}")
-                result = {
-                    "problem_id": i,
-                    "sample_id": sample,
-                    "problem": item['problem'],
-                    "ground_truth": item['answer'],
-                    "predicted_answer": "",
-                    "final_response": "",
-                    "conversation_history": [],
-                    "turn_count": 0,
-                    "correct": False,
-                    "error": str(e)
-                }
-                results.append(result)
+                tasks.append(task)
+        
+        # Execute all tasks concurrently and collect results as they complete
+        results = []
+        for completed_task in asyncio.as_completed(tasks):
+            result = await completed_task
+            results.append(result)
+    
+    pbar.close()
     
     # Calculate metrics
     total_samples = len(results)
@@ -329,6 +429,10 @@ def main():
         if pid not in problems:
             problems[pid] = []
         problems[pid].append(result)
+    
+    # Sort samples within each problem by sample_id
+    for pid in problems:
+        problems[pid].sort(key=lambda x: x['sample_id'])
     
     # Calculate pass@1 and pass@k
     pass_at_1 = sum(1 for pid, samples in problems.items() if any(s['correct'] for s in samples)) / len(problems)
@@ -353,12 +457,19 @@ def main():
                 "total_problems": len(problems),
                 "total_samples": total_samples,
                 "accuracy": accuracy,
-                "pass_at_1": pass_at_1
+                "pass_at_1": pass_at_1,
+                "max_concurrent_requests": args.max_concurrent_requests,
+                "max_concurrent_sandbox": args.max_concurrent_sandbox
             },
             "results": results
         }, f, indent=2, ensure_ascii=False)
     
     print(f"\nResults saved to: {args.output_path}")
+
+
+def main():
+    """Synchronous wrapper for the async main function"""
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":
