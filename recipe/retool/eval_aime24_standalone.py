@@ -11,6 +11,8 @@ import datasets
 import json
 import re
 import time
+import itertools
+import numpy as np
 from typing import Dict, Any, List, Optional
 from tqdm.asyncio import tqdm
 import logging
@@ -208,6 +210,24 @@ async def multi_turn_conversation_async(
     }
 
 
+def estimate_pass_at_k(num_samples, num_correct, k):
+    """Estimates pass@k of each problem and returns them in an array."""
+
+    def estimator(n: int, c: int, k: int) -> float:
+        """Calculates 1 - comb(n - c, k) / comb(n, k)."""
+        if n - c < k:
+            return 1.0
+        return 1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1))
+
+    if isinstance(num_samples, int):
+        num_samples_it = itertools.repeat(num_samples, len(num_correct))
+    else:
+        assert len(num_samples) == len(num_correct)
+        num_samples_it = iter(num_samples)
+
+    return np.array([estimator(int(n), int(c), k) for n, c in zip(num_samples_it, num_correct)])
+
+
 def extract_answer(text: str) -> str:
     """Extract the final answer from assistant response"""
     # Look for answer in boxed format
@@ -336,7 +356,7 @@ async def main_async():
     args = parse_args()
     
     # Setup logging
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARNING)
     
     # Create OpenAI client
     client = openai.OpenAI(base_url=args.base_url, api_key=args.api_key)
@@ -434,18 +454,26 @@ async def main_async():
     for pid in problems:
         problems[pid].sort(key=lambda x: x['sample_id'])
     
-    # Calculate pass@1 and pass@k
-    pass_at_1 = sum(1 for pid, samples in problems.items() if any(s['correct'] for s in samples)) / len(problems)
+    # Calculate pass@k using the correct HuggingFace formula
+    # Collect number of correct samples per problem
+    num_correct_per_problem = []
+    for pid, samples in problems.items():
+        num_correct = sum(1 for s in samples if s['correct'])
+        num_correct_per_problem.append(num_correct)
     
-    print(f"Pass@1: {pass_at_1:.4f} ({pass_at_1*100:.2f}%)")
+    # Calculate pass@k for different k values
+    pass_at_k_results = {}
+    k_values = [1, 5, 10, 20, 32]
     
-    if args.n_samples > 1:
-        # Calculate pass@k for different k values
-        for k in [min(args.n_samples, k) for k in [5, 10, 20, 32]]:
-            if k <= args.n_samples:
-                pass_at_k = sum(1 for pid, samples in problems.items() 
-                               if any(s['correct'] for s in samples[:k])) / len(problems)
-                print(f"Pass@{k}: {pass_at_k:.4f} ({pass_at_k*100:.2f}%)")
+    for k in k_values:
+        if k <= args.n_samples:
+            pass_at_k_scores = estimate_pass_at_k(args.n_samples, num_correct_per_problem, k)
+            pass_at_k = np.mean(pass_at_k_scores)
+            pass_at_k_results[k] = pass_at_k
+            print(f"Pass@{k}: {pass_at_k:.4f} ({pass_at_k*100:.2f}%)")
+    
+    # Extract pass@1 for backward compatibility
+    pass_at_1 = pass_at_k_results.get(1, 0)
     
     # Save results
     with open(args.output_path, 'w', encoding='utf-8') as f:
