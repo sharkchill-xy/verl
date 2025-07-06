@@ -55,10 +55,11 @@ def execute_code(code: str, sandbox_url: str, timeout: int = 30) -> Dict[str, An
         response.raise_for_status()
         result = response.json()
         
+        run_result = result.get("run_result", {})
         return {
-            "success": True,
-            "output": result.get("output", ""),
-            "error": result.get("error", "")
+            "success": result.get("status"),
+            "output": run_result.get("stdout", ""),
+            "error": run_result.get("stderr", "")    
         }
     except Exception as e:
         return {
@@ -107,6 +108,9 @@ def multi_turn_conversation(messages: List[Dict], tools: List[Dict], client, arg
                 max_tokens=args.max_length,
                 temperature=args.temperature,
                 top_p=args.top_p,
+                extra_body={
+                    "top_k": args.top_k,
+                }
             )
             
             assistant_message = response.choices[0].message
@@ -231,7 +235,7 @@ def main():
         
         
         **user question:** 
-        {example['problem']}
+        {example['Problem']}
         
         Remember to place the final answer in the last part using the format: 
         <answer>
@@ -247,8 +251,8 @@ def main():
         return {
             "messages": messages,
             "tools": TOOLS,
-            "problem": example['problem'],
-            "answer": example['answer']
+            "problem": example['Problem'],
+            "answer": example['Answer']
         }
     
     # Process dataset
@@ -290,7 +294,7 @@ def main():
                 
                 results.append(result)
                 
-                print(f"Sample {sample+1}: Predicted={predicted_answer}, Ground Truth={item['answer']}, Correct={result['correct']}")
+                print(f"Sample {sample+1}: Predicted={predicted_answer}, Ground Truth={item['answer']}, Correct={result['correct']}, Turn Count={conversation_result['turn_count']}")
                 
             except Exception as e:
                 print(f"Error processing problem {i+1}, sample {sample+1}: {e}")

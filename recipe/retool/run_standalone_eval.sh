@@ -1,15 +1,22 @@
 #!/bin/bash
 
+
+# vllm serve /data2/lixy/VerlCoder/checkpoints/retool-multiturn-sft/retool-multiturn-sft-qwen2.5-7b-sp4-lr5e-6/global_step_42 \
+# --port 8000 \
+# --tensor-parallel-size 4 \ 
+# --max-model-len 16384 \
+# --enable-auto-tool-choice \
+# --tool-call-parser hermes
+
 # 确保在正确的目录下运行
 cd /home/lixy/workspace/VerlCoder/verl
 
-# 设置环境变量
-export PYTHONPATH="/home/lixy/workspace/VerlCoder/verl:$PYTHONPATH"
+PYTHON_PATH=".venv/bin/python"
 
 # 运行参数配置
-MODEL_NAME="Qwen/Qwen2.5-7B-Instruct"
-BASE_URL="http://localhost:8000/v1"  # 假设使用 vLLM 或 SGLang 服务
-API_KEY="test"
+MODEL_NAME="/data2/lixy/VerlCoder/checkpoints/retool-multiturn-sft/retool-multiturn-sft-qwen2.5-7b-sp4-lr5e-6/global_step_42"
+BASE_URL="http://210.28.135.36:8000/v1"  # 假设使用 vLLM 或 SGLang 服务
+API_KEY="EMPTY"
 OUTPUT_PATH="/data2/lixy/VerlCoder/results/standalone_eval_results.json"
 
 # Sandbox Fusion URL
@@ -20,6 +27,7 @@ MAX_TURNS=4
 N_SAMPLES=1
 TEMPERATURE=0.7
 TOP_P=0.9
+TOP_K=50
 
 echo "Starting standalone AIME24 evaluation..."
 echo "Model: $MODEL_NAME"
