@@ -43,7 +43,7 @@ def collate_fn(data_list: list[dict]) -> dict:
 
     Returns:
         Dict where tensor entries are stacked into a torch.Tensor of shape
-        (batch_size, *dims) and non-tensor entries are converted to
+        (batch_size, \*dims) and non-tensor entries are converted to
         np.ndarray of dtype object with shape (batch_size,).
     """
     tensors = defaultdict(list)
@@ -115,11 +115,7 @@ class RLHFDataset(Dataset):
         self.need_tools_kwargs = config.get("need_tools_kwargs", False)
         self.filter_prompts = config.get("filter_prompts", True)
         self.serialize_dataset = False
-        self.processor_type = self.processor.image_processor.__class__.__name__ if self.processor is not None else None
-        if self.processor_type == "MiniCPMVImageProcessor":
-            from verl.utils.dataset.vision_utils import init_minicpmo_config
-
-            self.minicpmo_config = init_minicpmo_config(self.processor, config)
+        self.return_multi_modal_inputs = config.get("return_multi_modal_inputs", True)
 
         self._download()
         self._read_files_and_tokenize()
@@ -154,9 +150,15 @@ class RLHFDataset(Dataset):
 
                 def doc2len(doc) -> int:
                     messages = self._build_messages(doc)
-                    raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-                    images = [process_image(image) for image in messages.pop(image_key)] if image_key in messages else None
-                    videos = [process_video(video) for video in messages.pop(video_key)] if video_key in messages else None
+                    raw_prompt = self.processor.apply_chat_template(
+                        messages, add_generation_prompt=True, tokenize=False
+                    )
+                    images = (
+                        [process_image(image) for image in messages.pop(image_key)] if image_key in messages else None
+                    )
+                    videos = (
+                        [process_video(video) for video in messages.pop(video_key)] if video_key in messages else None
+                    )
 
                     return len(processor(text=[raw_prompt], images=images, videos=videos)["input_ids"][0])
 
@@ -188,9 +190,6 @@ class RLHFDataset(Dataset):
     def _build_messages(self, example: dict):
         messages: list = example.pop(self.prompt_key)
 
-        if self.processor_type == "MiniCPMVImageProcessor":
-            return messages
-
         if self.image_key in example or self.video_key in example:
             for message in messages:
                 content = message["content"]
@@ -220,25 +219,26 @@ class RLHFDataset(Dataset):
         if self.processor is not None:
             from verl.utils.dataset.vision_utils import process_image, process_video
 
-            if self.processor_type == "MiniCPMVImageProcessor":
-                from verl.utils.dataset.vision_utils import process_minicpmo_data
+            raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            multi_modal_data = {}
 
-                model_inputs, multi_modal_data, raw_prompt = process_minicpmo_data(row_dict, messages, self.tokenizer, self.minicpmo_config, self.image_key, self.max_prompt_length, self.truncation, logger)
-            else:
-                raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-                multi_modal_data = {}
+            images = None
+            if self.image_key in row_dict and row_dict.get(self.image_key, None) is not None:
+                images = [process_image(image) for image in row_dict.pop(self.image_key)]
 
-                images = None
-                if self.image_key in row_dict:
-                    images = [process_image(image) for image in row_dict.pop(self.image_key)]
-                    multi_modal_data["image"] = images
+                # due to the image key is "image" instead of "images" in vllm, we need to use "image" here
+                # link: https://github.com/vllm-project/vllm/blob/3c545c0c3b98ee642373a308197d750d0e449403/vllm/multimodal/parse.py#L205
+                multi_modal_data["image"] = images
 
-                videos = None
-                if self.video_key in row_dict:
-                    videos = [process_video(video) for video in row_dict.pop(self.video_key)]
-                    multi_modal_data["video"] = [video.numpy() for video in videos]
+            videos = None
+            if self.video_key in row_dict and row_dict.get(self.video_key, None) is not None:
+                videos = [process_video(video) for video in row_dict.pop(self.video_key)]
 
-                model_inputs = self.processor(text=[raw_prompt], images=images, videos=videos, return_tensors="pt")
+                # due to the video key is "video" instead of "videos" in vllm, we need to use "video" here
+                # link: https://github.com/vllm-project/vllm/blob/3c545c0c3b98ee642373a308197d750d0e449403/vllm/multimodal/parse.py#L205
+                multi_modal_data["video"] = [video.numpy() for video in videos]
+
+            model_inputs = self.processor(text=[raw_prompt], images=images, videos=videos, return_tensors="pt")
 
             input_ids = model_inputs.pop("input_ids")
             attention_mask = model_inputs.pop("attention_mask")
@@ -248,10 +248,14 @@ class RLHFDataset(Dataset):
 
             # There's a trap here, multi_modal_inputs has to be a dict, not BatchFeature
             row_dict["multi_modal_data"] = multi_modal_data
-            row_dict["multi_modal_inputs"] = dict(model_inputs)
 
-            # second_per_grid_ts isn't used for training, just for mrope
-            row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
+            # We will do batch.union() in the trainer,
+            # so we cannot have "multi_modal_inputs" in row_dict if rollout generates new multi_modal_inputs
+            if self.return_multi_modal_inputs:
+                row_dict["multi_modal_inputs"] = dict(model_inputs)
+
+                # second_per_grid_ts isn't used for training, just for mrope
+                row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
 
         else:
             raw_prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
@@ -259,40 +263,35 @@ class RLHFDataset(Dataset):
             input_ids = model_inputs.pop("input_ids")
             attention_mask = model_inputs.pop("attention_mask")
 
-        if not self.processor_type == "MiniCPMVImageProcessor":
-            input_ids, attention_mask = verl_F.postprocess_data(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_length=self.max_prompt_length,
-                pad_token_id=self.tokenizer.pad_token_id,
-                left_pad=True,
-                truncation=self.truncation,
-            )
+        input_ids, attention_mask = verl_F.postprocess_data(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_length=self.max_prompt_length,
+            pad_token_id=self.tokenizer.pad_token_id,
+            left_pad=True,
+            truncation=self.truncation,
+        )
 
-            if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
-                from verl.models.transformers.qwen2_vl import get_rope_index
+        if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
+            from verl.models.transformers.qwen2_vl import get_rope_index
 
-                position_ids = [
-                    get_rope_index(
-                        self.processor,
-                        input_ids=input_ids[0],
-                        image_grid_thw=model_inputs.get("image_grid_thw"),
-                        video_grid_thw=model_inputs.get("video_grid_thw"),
-                        second_per_grid_ts=model_inputs.get("second_per_grid_ts"),
-                        attention_mask=attention_mask[0],
-                    )
-                ]  # (1, 3, seq_len)
+            position_ids = [
+                get_rope_index(
+                    self.processor,
+                    input_ids=input_ids[0],
+                    image_grid_thw=model_inputs.get("image_grid_thw"),
+                    video_grid_thw=model_inputs.get("video_grid_thw"),
+                    second_per_grid_ts=model_inputs.get("second_per_grid_ts"),
+                    attention_mask=attention_mask[0],
+                )
+            ]  # (1, 3, seq_len)
 
-            else:
-                position_ids = compute_position_id_with_mask(attention_mask)
-
-            row_dict["input_ids"] = input_ids[0]
-            row_dict["attention_mask"] = attention_mask[0]
-            row_dict["position_ids"] = position_ids[0]
         else:
-            row_dict["input_ids"] = input_ids
-            row_dict["attention_mask"] = attention_mask
-            row_dict["position_ids"] = position_ids
+            position_ids = compute_position_id_with_mask(attention_mask)
+
+        row_dict["input_ids"] = input_ids[0]
+        row_dict["attention_mask"] = attention_mask[0]
+        row_dict["position_ids"] = position_ids[0]
 
         raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
         if len(raw_prompt_ids) > self.max_prompt_length:
