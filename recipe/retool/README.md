@@ -146,11 +146,12 @@ Main configuration template in `config/retool_grpo_template.yaml`:
 |-------|--------|---------|----------------|
 | Qwen2.5-7B-Instruct (baseline) | 12.71% | 30.00% | - |
 | ReTool SFT | 16.04% | 50.00% | Supervised Fine-tuning |
-| **ReTool GRPO** | **27.50%** | **53.33%** | **GRPO Training** |
+| **ReTool GRPO** | **27.50%** | **66.67%** | **GRPO Training** |
 
 ### Key Improvements
 
 - **Pass@1 improvement**: +14.79% absolute (117% relative increase)
+- **Pass@32 improvement**: +36.67% absolute (122% relative increase)
 - **Tool utilization**: Effective code execution for mathematical reasoning
 - **Multi-turn capability**: Leverages extended interactions for complex problems
 
