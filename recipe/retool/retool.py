@@ -28,10 +28,14 @@ logger = logging.getLogger(__name__)
 class CustomSandboxFusionTool(SandboxFusionTool):
     def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
         super().__init__(config, tool_schema)
-        self.code_pattern = re.compile(r"```python(.*?)```", re.DOTALL)
+        self.code_pattern = re.compile(r"```(?:python|python3)(.*?)```", re.DOTALL)
 
     async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> Tuple[str, float, dict]:
-        code = parameters["code"]
+        code = parameters.get("code", "")
+        if not code:
+            return "Error: No code provided", None, None
+        if not isinstance(code, str):
+            code = str(code)
         matches = self.code_pattern.findall(code)
         if matches:
             code = matches[0].strip()
@@ -46,12 +50,17 @@ class CustomSandboxFusionTool(SandboxFusionTool):
             break
         code = "\n".join(lines)
 
-        timeout = parameters.get("timeout", self.default_timeout)
+        # timeout = parameters.get("timeout", self.default_timeout)
         language = parameters.get("language", self.default_language)
+
+        # Normalize language to what Sandbox Fusion API supports
+        if language.lower() in ["python3", "py", "py3"]:
+            language = "python"
+        
         if not isinstance(code, str):
             code = str(code)
 
-        result = await self.execution_pool.execute.remote(self.execute_code, instance_id, code, timeout, language)
+        result = await self.execution_pool.execute.remote(self.execute_code, instance_id, code)
         # sandbox has no score or metrics, use Nones
         return result, None, None
 

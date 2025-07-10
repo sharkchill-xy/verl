@@ -14,10 +14,11 @@ cd /home/lixy/workspace/VerlCoder/verl
 PYTHON_PATH=".venv/bin/python"
 
 # 运行参数配置
-MODEL_NAME="/data2/lixy/VerlCoder/checkpoints/retool-multiturn-sft/retool-multiturn-sft-qwen2.5-7b-sp4-lr5e-6/global_step_42"
+# MODEL_NAME="/data2/lixy/VerlCoder/checkpoints/retool-multiturn-sft/retool-multiturn-sft-qwen2.5-7b-sp4-lr5e-6/global_step_42"
+MODEL_NAME="/data2/lixy/VerlCoder/checkpoints/retool-grpo-hf/global_step_100"
 BASE_URL="http://210.28.135.36:8000/v1"  
 API_KEY="EMPTY"
-OUTPUT_PATH="/data2/lixy/VerlCoder/results/standalone_eval_results.json"
+OUTPUT_PATH="/data2/lixy/VerlCoder/results/retool_grpo_step_100_eval_results.json"
 
 # Sandbox Fusion URL
 SANDBOX_URL="http://210.28.135.36:8080"
@@ -30,7 +31,7 @@ TOP_P=0.9
 TOP_K=50
 
 # 并发参数
-MAX_CONCURRENT_REQUESTS=32
+MAX_CONCURRENT_REQUESTS=64
 MAX_CONCURRENT_SANDBOX=32
 REQUEST_TIMEOUT=300
 

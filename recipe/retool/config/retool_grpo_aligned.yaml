@@ -1,0 +1,45 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  max_prompt_length: 8192
+  max_response_length: 8192
+  train_batch_size: 256
+  return_raw_chat: True
+  train_files: /data2/lixy/VerlCoder/data/retool_dapo_split/train.parquet
+  val_files: /data2/lixy/VerlCoder/data/retool_dapo_split/val.parquet
+
+actor_rollout_ref:
+  hybrid_engine: True
+  model:
+    path: /data2/lixy/VerlCoder/checkpoints/retool-multiturn-sft/retool-multiturn-sft-qwen2.5-7b-sp4-lr5e-6/global_step_42
+    trust_remote_code: True
+  rollout:
+    name: sglang
+    multi_turn:
+      enable: True
+      max_assistant_turns: 8
+      max_user_turns: 8
+      tool_config_path: /home/lixy/workspace/VerlCoder/verl/recipe/retool/config/tool_config/retool.yaml
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: False
+
+trainer:
+  critic_warmup: 0
+  logger: ['console', 'swanlab']
+  project_name: 'retool_grpo'
+  experiment_name: 'retool-grpo-qwen2.5-7b-aligned'
+  n_gpus_per_node: 8
+  nnodes: 1
+  save_freq: 20
+  test_freq: 20
+  total_training_steps: 100
+  val_before_train: False
+  default_local_dir: /data2/lixy/VerlCoder/checkpoints/retool-grpo
